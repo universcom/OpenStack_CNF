@@ -1,0 +1,190 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────
+# CNF — local development stack
+# Simulates two OpenStack clusters + shared infrastructure
+# ─────────────────────────────────────────────
+
+x-cnf-base: &cnf-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    etcd:
+      condition: service_healthy
+  environment: &cnf-env
+    CNF_DB_URL:             "postgresql+asyncpg://cnf:cnf@postgres:5432/cnf"
+    CNF_CELERY_BROKER_URL:  "redis://redis:6379/0"
+    CNF_CELERY_RESULT_BACKEND: "redis://redis:6379/1"
+    CNF_RAFT_ETCD_ENDPOINTS: '["etcd:2379"]'
+    CNF_GRPC_TLS_ENABLED:   "false"
+    CNF_BGP_ENABLED:        "false"
+    CNF_METRICS_ENABLED:    "true"
+    CNF_LOG_FORMAT:         "console"
+    CNF_LOG_LEVEL:          "DEBUG"
+    # OpenStack (DevStack or MicroStack)
+    OS_AUTH_URL:            "${OS_AUTH_URL:-http://devstack:5000/v3}"
+    OS_USERNAME:            "${OS_USERNAME:-admin}"
+    OS_PASSWORD:            "${OS_PASSWORD:-secret}"
+    OS_PROJECT_NAME:        "admin"
+    OS_USER_DOMAIN_NAME:    "Default"
+    OS_PROJECT_DOMAIN_NAME: "Default"
+    OS_REGION_NAME:         "RegionOne"
+
+
+services:
+
+  # ── Shared infrastructure ──────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER:     cnf
+      POSTGRES_PASSWORD: cnf
+      POSTGRES_DB:       cnf
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cnf"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "6379:6379"
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.12
+    command:
+      - etcd
+      - --name=etcd0
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --initial-cluster=etcd0=http://etcd:2380
+      - --initial-cluster-state=new
+    volumes:
+      - etcd_data:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://localhost:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "2379:2379"
+
+  # ── CNF Agent — Cluster 1 (will compete to become master) ─────────
+
+  cnf-agent-1:
+    <<: *cnf-base
+    environment:
+      <<: *cnf-env
+      CNF_CLUSTER_ID:        "cluster-os1"
+      CNF_CLUSTER_NAME:      "openstack-1"
+      CNF_CLUSTER_GRPC_ADDR: "cnf-agent-1:50051"
+      CNF_API_PORT:          "8080"
+      CNF_GRPC_PORT:         "50051"
+      CNF_METRICS_PORT:      "9090"
+    ports:
+      - "8081:8080"   # REST API
+      - "9091:9090"   # Prometheus
+    volumes:
+      - ./deploy/dev/cnf-1.yaml:/etc/cnf/cnf.yaml:ro
+
+  # ── CNF Agent — Cluster 2 (worker) ────────────────────────────────
+
+  cnf-agent-2:
+    <<: *cnf-base
+    environment:
+      <<: *cnf-env
+      CNF_CLUSTER_ID:        "cluster-os2"
+      CNF_CLUSTER_NAME:      "openstack-2"
+      CNF_CLUSTER_GRPC_ADDR: "cnf-agent-2:50051"
+      CNF_API_PORT:          "8080"
+      CNF_GRPC_PORT:         "50051"
+      CNF_METRICS_PORT:      "9090"
+    ports:
+      - "8082:8080"
+      - "9092:9090"
+    volumes:
+      - ./deploy/dev/cnf-2.yaml:/etc/cnf/cnf.yaml:ro
+
+  # ── Celery worker (migration task executor) ───────────────────────
+
+  celery-worker:
+    <<: *cnf-base
+    command: ["celery", "-A", "cnf.tasks.migration_tasks", "worker",
+              "--loglevel=info", "--concurrency=4", "-Q", "migrations"]
+    environment:
+      <<: *cnf-env
+      CNF_CLUSTER_ID:   "cluster-os1"
+      CNF_CLUSTER_NAME: "openstack-1"
+    depends_on:
+      - redis
+      - postgres
+
+  # ── Celery beat (scheduler trigger) ──────────────────────────────
+
+  celery-beat:
+    <<: *cnf-base
+    command: ["celery", "-A", "cnf.tasks.migration_tasks", "beat",
+              "--loglevel=info"]
+    environment:
+      <<: *cnf-env
+      CNF_CLUSTER_ID:   "cluster-os1"
+      CNF_CLUSTER_NAME: "openstack-1"
+    depends_on:
+      - redis
+
+  # ── Prometheus ────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    volumes:
+      - ./deploy/dev/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    ports:
+      - "9093:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+
+  # ── Grafana ───────────────────────────────────────────────────────
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/dev/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+
+volumes:
+  pg_data:
+  etcd_data:
+  prom_data:
+  grafana_data:

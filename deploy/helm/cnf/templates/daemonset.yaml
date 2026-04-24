@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "cnf.fullname" . }}
+  labels:
+    {{- include "cnf.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "cnf.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cnf.selectorLabels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.metrics.port }}"
+    spec:
+      hostNetwork: {{ .Values.hostNetwork }}
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      containers:
+        - name: cnf-agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: api
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+            - name: grpc
+              containerPort: {{ .Values.grpc.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+          env:
+            - name: CNF_CLUSTER_ID
+              value: "{{ .Values.cluster.id }}"
+            - name: CNF_CLUSTER_NAME
+              value: "{{ .Values.cluster.name }}"
+            - name: CNF_CLUSTER_GRPC_ADDR
+              value: "{{ .Values.cluster.grpcAddr }}"
+            - name: CNF_PEER_CLUSTERS
+              value: {{ .Values.peers | toJson | quote }}
+            - name: CNF_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.secretKey }}
+            - name: CNF_CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: redis-url
+            - name: CNF_GRPC_PORT
+              value: "{{ .Values.grpc.port }}"
+            - name: CNF_GRPC_TLS_ENABLED
+              value: "{{ .Values.grpc.tls.enabled }}"
+            - name: CNF_BGP_ENABLED
+              value: "{{ .Values.bgp.enabled }}"
+            - name: CNF_BGP_AS_NUMBER
+              value: "{{ .Values.bgp.asNumber }}"
+            - name: CNF_RAFT_ETCD_ENDPOINTS
+              value: {{ .Values.etcd.endpoints | toJson | quote }}
+            - name: CNF_LOG_LEVEL
+              value: "{{ .Values.logLevel }}"
+            - name: CNF_LOG_FORMAT
+              value: "{{ .Values.logFormat }}"
+          envFrom:
+            - secretRef:
+                name: {{ .Values.openstack.existingSecret }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: cnf-config
+              mountPath: /etc/cnf
+              readOnly: true
+            {{- if .Values.grpc.tls.enabled }}
+            - name: grpc-tls
+              mountPath: /etc/cnf/tls
+              readOnly: true
+            {{- end }}
+            {{- if .Values.volumes.cephConf.enabled }}
+            - name: ceph-conf
+              mountPath: /etc/ceph
+              readOnly: true
+            {{- end }}
+            {{- if .Values.volumes.libvirt.enabled }}
+            - name: libvirt-sock
+              mountPath: /var/run/libvirt
+            {{- end }}
+            {{- if .Values.volumes.frr.enabled }}
+            - name: frr-sock
+              mountPath: /var/run/frr
+            {{- end }}
+      volumes:
+        - name: cnf-config
+          configMap:
+            name: {{ include "cnf.fullname" . }}-config
+        {{- if .Values.grpc.tls.enabled }}
+        - name: grpc-tls
+          secret:
+            secretName: {{ .Values.grpc.tls.secretName }}
+        {{- end }}
+        {{- if .Values.volumes.cephConf.enabled }}
+        - name: ceph-conf
+          hostPath:
+            path: {{ .Values.volumes.cephConf.hostPath }}
+        {{- end }}
+        {{- if .Values.volumes.libvirt.enabled }}
+        - name: libvirt-sock
+          hostPath:
+            path: {{ .Values.volumes.libvirt.hostPath }}
+        {{- end }}
+        {{- if .Values.volumes.frr.enabled }}
+        - name: frr-sock
+          hostPath:
+            path: {{ .Values.volumes.frr.hostPath }}
+        {{- end }}

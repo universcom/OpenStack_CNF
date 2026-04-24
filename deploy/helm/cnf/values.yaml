@@ -1,0 +1,111 @@
+# deploy/helm/cnf/values.yaml — production Helm chart values
+
+image:
+  repository: registry.example.com/cnf/agent
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# Number of CNF agent replicas (one per OpenStack cluster controller)
+# In production, deploy as DaemonSet targeting controller nodes via nodeSelector
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+cluster:
+  id: ""            # Required: unique UUID per cluster
+  name: ""          # Required: human-readable name e.g. "openstack-prod-1"
+  grpcAddr: ""      # Required: host:port this node advertises for gRPC
+
+peers: []           # List of peer gRPC addresses: ["os2.example.com:50051"]
+
+api:
+  port: 8080
+  host: "0.0.0.0"
+
+grpc:
+  port: 50051
+  tls:
+    enabled: true
+    secretName: cnf-grpc-tls   # k8s Secret with tls.crt, tls.key, ca.crt
+
+metrics:
+  enabled: true
+  port: 9090
+  serviceMonitor:
+    enabled: true   # Prometheus Operator ServiceMonitor
+
+database:
+  url: ""           # Required: postgresql+asyncpg://user:pass@host/db
+  existingSecret: "cnf-db-secret"
+  secretKey: "url"
+
+redis:
+  url: "redis://redis:6379/0"
+  existingSecret: "cnf-redis-secret"
+  secretKey: "url"
+
+etcd:
+  endpoints: ["etcd:2379"]
+  tls:
+    enabled: false
+    secretName: cnf-etcd-tls
+
+openstack:
+  existingSecret: "cnf-openstack-secret"  # must contain OS_* env vars
+
+ceph:
+  confPath: "/etc/ceph/ceph.conf"
+  keyringPath: "/etc/ceph/ceph.client.cnf.keyring"
+  pool: "vms"
+  existingSecret: "cnf-ceph-secret"
+
+bgp:
+  enabled: true
+  asNumber: 65000
+  routeReflectorAddr: ""
+
+raft:
+  electionTimeoutMs: 1500
+  heartbeatIntervalMs: 500
+  leaseTtlSeconds: 10
+
+logLevel: "INFO"
+logFormat: "json"
+
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "512Mi"
+
+nodeSelector:
+  node-role.kubernetes.io/control-plane: ""
+
+tolerations:
+  - key: "node-role.kubernetes.io/control-plane"
+    operator: "Exists"
+    effect: "NoSchedule"
+
+affinity: {}
+
+service:
+  type: ClusterIP
+  apiPort: 8080
+  grpcPort: 50051
+  metricsPort: 9090
+
+hostNetwork: true   # Required for BGP/FRR to see host network interfaces
+
+volumes:
+  cephConf:
+    enabled: true
+    hostPath: /etc/ceph
+  libvirt:
+    enabled: true
+    hostPath: /var/run/libvirt
+  frr:
+    enabled: true
+    hostPath: /var/run/frr

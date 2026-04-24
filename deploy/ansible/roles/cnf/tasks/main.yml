@@ -1,0 +1,123 @@
+---
+# deploy/ansible/roles/cnf/tasks/main.yml
+# Deploys CNF agent on each OpenStack controller node
+
+- name: Ensure Python 3.11 is available
+  ansible.builtin.package:
+    name:
+      - python3.11
+      - python3.11-dev
+      - python3-pip
+      - librados-dev
+      - librbd-dev
+      - libvirt-dev
+      - frr
+      - etcd
+    state: present
+
+- name: Create cnf system user
+  ansible.builtin.user:
+    name: cnf
+    system: true
+    shell: /bin/bash
+    home: /var/lib/cnf
+    create_home: true
+
+- name: Create CNF directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: cnf
+    group: cnf
+    mode: "0750"
+  loop:
+    - /etc/cnf
+    - /etc/cnf/tls
+    - /var/log/cnf
+    - /var/lib/cnf
+
+- name: Install openstack-cnf package
+  ansible.builtin.pip:
+    name: openstack-cnf
+    version: "{{ cnf_version | default('0.1.0') }}"
+    executable: pip3
+    extra_args: "--index-url {{ cnf_pip_index | default('https://pypi.org/simple') }}"
+
+- name: Compile protobuf stubs
+  ansible.builtin.command:
+    cmd: >
+      python3 -m grpc_tools.protoc
+      -I /usr/local/lib/python3.11/dist-packages/cnf/../../../proto
+      --python_out=/usr/local/lib/python3.11/dist-packages/cnf/grpc
+      --grpc_python_out=/usr/local/lib/python3.11/dist-packages/cnf/grpc
+      proto/cnf.proto
+  changed_when: false
+  ignore_errors: true
+
+- name: Deploy CNF configuration
+  ansible.builtin.template:
+    src: cnf.yaml.j2
+    dest: /etc/cnf/cnf.yaml
+    owner: cnf
+    group: cnf
+    mode: "0640"
+  notify: Restart CNF agent
+
+- name: Deploy TLS certificates
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "/etc/cnf/tls/{{ item.name }}"
+    owner: cnf
+    group: cnf
+    mode: "0640"
+  loop:
+    - { name: "ca.crt",     content: "{{ cnf_tls_ca }}" }
+    - { name: "server.crt", content: "{{ cnf_tls_cert }}" }
+    - { name: "server.key", content: "{{ cnf_tls_key }}" }
+  no_log: true
+  notify: Restart CNF agent
+
+- name: Deploy systemd service unit
+  ansible.builtin.template:
+    src: cnf-agent.service.j2
+    dest: /etc/systemd/system/cnf-agent.service
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart CNF agent
+
+- name: Register CNF as OpenStack service
+  openstack.cloud.catalog:
+    name: cnf
+    service_type: cnf
+    description: "Cluster Nova Federation"
+    state: present
+  delegate_to: "{{ groups['controllers'][0] }}"
+  run_once: true
+
+- name: Create CNF endpoint
+  openstack.cloud.endpoint:
+    service: cnf
+    endpoint_interface: "{{ item }}"
+    url: "http://{{ ansible_host }}:8080/v1"
+    region: "{{ openstack_region | default('RegionOne') }}"
+    state: present
+  loop: [public, internal, admin]
+  delegate_to: "{{ groups['controllers'][0] }}"
+  run_once: true
+
+- name: Enable and start CNF agent
+  ansible.builtin.systemd:
+    name: cnf-agent
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for CNF API to become healthy
+  ansible.builtin.uri:
+    url: "http://localhost:8080/healthz"
+    status_code: 200
+  register: health_check
+  until: health_check.status == 200
+  retries: 12
+  delay: 5

@@ -1,0 +1,118 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "openstack-cnf"
+version = "0.1.0"
+description = "Cluster Nova Federation — cross-cluster VM migration for OpenStack"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [{ name = "CNF Contributors" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: OpenStack",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: System :: Distributed Computing",
+]
+dependencies = [
+    # OpenStack
+    "openstacksdk>=3.0.0",
+    "python-openstackclient>=6.0.0",
+    "osc-lib>=2.8.0",
+    "keystoneauth1>=5.3.0",
+    "cliff>=4.7.0",
+    # API
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "httpx>=0.27.0",
+    # gRPC
+    "grpcio>=1.62.0",
+    "grpcio-tools>=1.62.0",
+    "protobuf>=4.25.0",
+    # Database
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
+    "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.9",
+    # Cache / Queue
+    "redis>=5.0.0",
+    "celery[redis]>=5.3.0",
+    # Ceph
+    "rados; sys_platform == 'linux'",
+    "rbd; sys_platform == 'linux'",
+    # Config / validation
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.1",
+    # Observability
+    "prometheus-client>=0.20.0",
+    "structlog>=24.1.0",
+    "opentelemetry-sdk>=1.23.0",
+    "opentelemetry-instrumentation-fastapi>=0.44b0",
+    # Raft / leader election
+    "python-etcd3>=0.12.0",
+    # Networking / BGP
+    "pyroute2>=0.7.12",
+    # Crypto / security
+    "cryptography>=42.0.0",
+    "PyJWT>=2.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "fakeredis>=2.21.0",
+    "httpx>=0.27.0",
+    "mypy>=1.8.0",
+    "ruff>=0.3.0",
+    "black>=24.0.0",
+    "pre-commit>=3.6.0",
+]
+
+[project.scripts]
+cnf-agent = "cnf.main:main"
+cnf-manage = "cnf.manage:main"
+
+[project.entry-points."openstack.cli.extension"]
+cnf = "cnf.osc.plugin"
+
+[project.entry-points."openstack.cnf.v1"]
+"cnf_cluster_list"     = "cnf.osc.v1.cluster:ListCluster"
+"cnf_cluster_show"     = "cnf.osc.v1.cluster:ShowCluster"
+"cnf_cluster_metrics"  = "cnf.osc.v1.cluster:ClusterMetrics"
+"cnf_cluster_register" = "cnf.osc.v1.cluster:RegisterCluster"
+"cnf_vm_list"          = "cnf.osc.v1.vm:ListVM"
+"cnf_vm_migrate"       = "cnf.osc.v1.vm:MigrateVM"
+"cnf_vm_live_migrate"  = "cnf.osc.v1.vm:LiveMigrateVM"
+"cnf_vm_status"        = "cnf.osc.v1.vm:VMStatus"
+"cnf_master_show"      = "cnf.osc.v1.master:ShowMaster"
+"cnf_master_elect"     = "cnf.osc.v1.master:ElectMaster"
+"cnf_policy_list"      = "cnf.osc.v1.policy:ListPolicy"
+"cnf_policy_set"       = "cnf.osc.v1.policy:SetPolicy"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cnf*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=cnf --cov-report=term-missing"

@@ -1,0 +1,176 @@
+syntax = "proto3";
+
+package cnf.v1;
+
+option py_generic_services = true;
+
+// ─────────────────────────────────────────────
+// Shared messages
+// ─────────────────────────────────────────────
+
+message ClusterInfo {
+  string id         = 1;
+  string name       = 2;
+  string role       = 3;  // "master" | "worker"
+  string auth_url   = 4;
+  string region     = 5;
+  string grpc_addr  = 6;
+  string status     = 7;  // "online" | "degraded" | "offline"
+  int64  updated_at = 8;
+}
+
+message VMInfo {
+  string id            = 1;
+  string name          = 2;
+  string cluster_id    = 3;
+  string status        = 4;
+  string host          = 5;
+  string flavor_id     = 6;
+  repeated string ips  = 7;
+  repeated string volumes = 8;
+}
+
+message ClusterMetrics {
+  string cluster_id     = 1;
+  double cpu_used_pct   = 2;
+  double ram_used_pct   = 3;
+  double disk_used_pct  = 4;
+  int64  vm_count       = 5;
+  double network_bw_mbps = 6;
+  int64  collected_at   = 7;
+}
+
+message MigrationStatus {
+  string migration_id  = 1;
+  string vm_id         = 2;
+  string source_cluster = 3;
+  string dest_cluster   = 4;
+  string type           = 5;  // "cold" | "live"
+  string state          = 6;  // "pending"|"preflight"|"disk"|"memory"|"cutover"|"bgp"|"done"|"failed"
+  double progress_pct   = 7;
+  string error          = 8;
+  int64  started_at     = 9;
+  int64  finished_at    = 10;
+}
+
+// ─────────────────────────────────────────────
+// CNFControl — master issues commands to workers
+// ─────────────────────────────────────────────
+
+service CNFControl {
+  // Cluster management
+  rpc GetClusterInfo    (GetClusterInfoRequest)    returns (GetClusterInfoResponse);
+  rpc GetClusterMetrics (GetClusterMetricsRequest) returns (GetClusterMetricsResponse);
+  rpc ListVMs           (ListVMsRequest)            returns (ListVMsResponse);
+
+  // Migration
+  rpc ExecuteMigration     (MigrationRequest)  returns (MigrationResponse);
+  rpc ExecuteLiveMigration (MigrationRequest)  returns (MigrationResponse);
+  rpc GetMigrationStatus   (MigrationStatusRequest) returns (MigrationStatusResponse);
+  rpc AbortMigration       (AbortMigrationRequest)  returns (AbortMigrationResponse);
+
+  // Ceph RBD coordination
+  rpc PromoteRBDImage (RBDPromoteRequest) returns (RBDPromoteResponse);
+  rpc DemoteRBDImage  (RBDDemoteRequest)  returns (RBDDemoteResponse);
+  rpc GetRBDMirrorLag (RBDMirrorLagRequest) returns (RBDMirrorLagResponse);
+
+  // BGP coordination
+  rpc AnnounceIP  (BGPAnnounceRequest)  returns (BGPAnnounceResponse);
+  rpc WithdrawIP  (BGPWithdrawRequest)  returns (BGPWithdrawResponse);
+}
+
+// CNFControl request/response messages
+
+message GetClusterInfoRequest  { string cluster_id = 1; }
+message GetClusterInfoResponse { ClusterInfo cluster = 1; }
+
+message GetClusterMetricsRequest  { string cluster_id = 1; }
+message GetClusterMetricsResponse { ClusterMetrics metrics = 1; }
+
+message ListVMsRequest  { string cluster_id = 1; }
+message ListVMsResponse { repeated VMInfo vms = 1; }
+
+message MigrationRequest {
+  string vm_id          = 1;
+  string source_cluster = 2;
+  string dest_cluster   = 3;
+  string migration_id   = 4;
+  map<string,string> options = 5;
+}
+message MigrationResponse {
+  string migration_id = 1;
+  bool   accepted     = 2;
+  string message      = 3;
+}
+
+message MigrationStatusRequest  { string migration_id = 1; }
+message MigrationStatusResponse { MigrationStatus status = 1; }
+
+message AbortMigrationRequest  { string migration_id = 1; string reason = 2; }
+message AbortMigrationResponse { bool success = 1; string message = 2; }
+
+message RBDPromoteRequest  { string pool = 1; string image = 2; bool force = 3; }
+message RBDPromoteResponse { bool success = 1; string message = 2; }
+
+message RBDDemoteRequest   { string pool = 1; string image = 2; }
+message RBDDemoteResponse  { bool success = 1; string message = 2; }
+
+message RBDMirrorLagRequest  { string pool = 1; string image = 2; }
+message RBDMirrorLagResponse { int64 lag_bytes = 1; int64 lag_seconds = 2; bool synced = 3; }
+
+message BGPAnnounceRequest  { string cluster_id = 1; string prefix = 2; string next_hop = 3; }
+message BGPAnnounceResponse { bool success = 1; }
+
+message BGPWithdrawRequest  { string cluster_id = 1; string prefix = 2; }
+message BGPWithdrawResponse { bool success = 1; }
+
+
+// ─────────────────────────────────────────────
+// CNFPeer — Raft-based leader election + gossip
+// ─────────────────────────────────────────────
+
+service CNFPeer {
+  rpc Heartbeat     (HeartbeatRequest)     returns (HeartbeatResponse);
+  rpc RequestVote   (RequestVoteRequest)   returns (RequestVoteResponse);
+  rpc AppendEntries (AppendEntriesRequest) returns (AppendEntriesResponse);
+  rpc SyncState     (SyncStateRequest)     returns (SyncStateResponse);
+}
+
+message HeartbeatRequest  {
+  string leader_id  = 1;
+  int64  term       = 2;
+  int64  timestamp  = 3;
+  ClusterMetrics metrics = 4;
+}
+message HeartbeatResponse { bool   ok = 1; int64 term = 2; }
+
+message RequestVoteRequest {
+  string candidate_id   = 1;
+  int64  term           = 2;
+  int64  last_log_index = 3;
+  int64  last_log_term  = 4;
+}
+message RequestVoteResponse { bool vote_granted = 1; int64 term = 2; }
+
+message AppendEntriesRequest {
+  string leader_id   = 1;
+  int64  term        = 2;
+  int64  prev_index  = 3;
+  int64  prev_term   = 4;
+  repeated LogEntry entries = 5;
+  int64  leader_commit = 6;
+}
+message AppendEntriesResponse { bool success = 1; int64 term = 2; }
+
+message LogEntry {
+  int64  index   = 1;
+  int64  term    = 2;
+  string command = 3;
+  bytes  data    = 4;
+}
+
+message SyncStateRequest  { string from_cluster = 1; }
+message SyncStateResponse {
+  repeated ClusterInfo clusters = 1;
+  repeated MigrationStatus active_migrations = 2;
+}

@@ -1,0 +1,53 @@
+# deploy/ansible/roles/cnf/templates/cnf.yaml.j2
+cluster_id:        "{{ cnf_cluster_id }}"
+cluster_name:      "{{ cnf_cluster_name }}"
+cluster_grpc_addr: "{{ ansible_host }}:50051"
+
+peer_clusters: {{ cnf_peer_clusters | default([]) | to_json }}
+
+log_level:  "{{ cnf_log_level | default('INFO') }}"
+log_format: "json"
+
+ceph:
+  conf_path:    "/etc/ceph/ceph.conf"
+  keyring_path: "/etc/ceph/ceph.client.cnf.keyring"
+  client_name:  "client.cnf"
+  pool:         "{{ cnf_ceph_pool | default('vms') }}"
+  mirror_mode:  "image"
+  mirror_lag_threshold_bytes: {{ cnf_ceph_lag_threshold | default(52428800) }}
+
+bgp:
+  enabled:               {{ cnf_bgp_enabled | default(true) | lower }}
+  as_number:             {{ cnf_bgp_as }}
+  route_reflector_addr:  "{{ cnf_bgp_rr_addr | default('') }}"
+  bfd_enabled:           {{ cnf_bgp_bfd | default(true) | lower }}
+  convergence_wait_seconds: 5
+
+grpc:
+  port:        50051
+  tls_enabled: {{ cnf_grpc_tls | default(true) | lower }}
+  tls_cert:    "/etc/cnf/tls/server.crt"
+  tls_key:     "/etc/cnf/tls/server.key"
+  tls_ca:      "/etc/cnf/tls/ca.crt"
+
+raft:
+  etcd_endpoints: {{ cnf_etcd_endpoints | default(['localhost:2379']) | to_json }}
+  lease_ttl_seconds:       10
+  election_timeout_ms:   1500
+  heartbeat_interval_ms:  500
+
+api:
+  host: "0.0.0.0"
+  port: 8080
+
+database:
+  url: "{{ cnf_db_url }}"
+
+celery:
+  broker_url:     "{{ cnf_redis_url }}"
+  result_backend: "{{ cnf_redis_url | regex_replace('/0$', '/1') }}"
+
+metrics:
+  enabled: true
+  port:    9090
+  collection_interval_seconds: 30
