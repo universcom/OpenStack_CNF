@@ -1,0 +1,8 @@
+---
+# deploy/ansible/roles/cnf/handlers/main.yml
+
+- name: Restart CNF agent
+  community.docker.docker_container:
+    name: "{{ cnf_container_name | default('cnf-agent') }}"
+    state: started
+    restart: true

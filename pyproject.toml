@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "openstack-cnf"
@@ -41,9 +41,11 @@ dependencies = [
     # Cache / Queue
     "redis>=5.0.0",
     "celery[redis]>=5.3.0",
-    # Ceph
-    "rados; sys_platform == 'linux'",
-    "rbd; sys_platform == 'linux'",
+    # Hypervisor (live migration via QEMU/libvirt) — Linux only.
+    # Ceph rbd/rados Python bindings are NOT on PyPI; the code shells out to
+    # the `rbd` CLI from ceph-common and reads cluster config from /etc/ceph,
+    # so no Python ceph deps are required here.
+    "libvirt-python>=10.0.0; sys_platform == 'linux'",
     # Config / validation
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
@@ -54,8 +56,8 @@ dependencies = [
     "structlog>=24.1.0",
     "opentelemetry-sdk>=1.23.0",
     "opentelemetry-instrumentation-fastapi>=0.44b0",
-    # Raft / leader election
-    "python-etcd3>=0.12.0",
+    # Raft / leader election (PyPI package name is `etcd3`, not `python-etcd3`)
+    "etcd3>=0.12.0",
     # Networking / BGP
     "pyroute2>=0.7.12",
     # Crypto / security

@@ -1,0 +1,20 @@
+---
+# deploy/ansible/roles/cnf/defaults/main.yml
+
+cnf_version: "0.1.0"
+
+# Container image. Override cnf_image / cnf_image_tag to point at a private
+# registry or a pinned digest.
+cnf_image: "ghcr.io/your-org/openstack-cnf"
+cnf_image_tag: "{{ cnf_version }}"
+cnf_image_force_pull: false
+
+cnf_container_name: "cnf-agent"
+
+# Set false on hosts that already have Docker (or use podman + docker shim).
+cnf_install_docker: true
+
+# Optional registry auth — leave undefined for public registries.
+# cnf_image_registry: "registry.example.com"
+# cnf_image_registry_user: "deploy"
+# cnf_image_registry_password: "{{ vault_registry_password }}"

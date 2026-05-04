@@ -253,10 +253,13 @@ Services:
 
 ### Ansible
 
+The role deploys CNF as a **Docker container** on each controller (host networking, with `/etc/cnf`, `/etc/ceph`, `/var/run/libvirt`, and `/var/run/frr` bind-mounted in). FRR and libvirt remain on the host; only the agent runs in the container.
+
 ```bash
 cd deploy/ansible
 ansible-playbook -i inventory/production site.yml \
-  -e cnf_version=0.1.0 \
+  -e cnf_image=ghcr.io/your-org/openstack-cnf \
+  -e cnf_image_tag=0.1.0 \
   -e @vars/production.yml
 ```
 

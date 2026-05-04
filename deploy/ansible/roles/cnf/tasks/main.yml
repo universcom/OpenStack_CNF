@@ -1,29 +1,47 @@
 ---
 # deploy/ansible/roles/cnf/tasks/main.yml
-# Deploys CNF agent on each OpenStack controller node
+# Deploys CNF agent as a container on each OpenStack controller node.
+# Host still provides: FRR (BGP), libvirt, Ceph client config — the container
+# binds to those via host networking and bind-mounts.
 
-- name: Ensure Python 3.11 is available
+- name: Install host-side dependencies (FRR + container runtime prerequisites)
   ansible.builtin.package:
     name:
-      - python3.11
-      - python3.11-dev
-      - python3-pip
-      - librados-dev
-      - librbd-dev
-      - libvirt-dev
       - frr
-      - etcd
+      - ca-certificates
+      - curl
+      - python3
     state: present
 
-- name: Create cnf system user
+- name: Install Docker engine
+  ansible.builtin.package:
+    name:
+      - docker.io
+      - python3-docker
+    state: present
+  when: cnf_install_docker | default(true) | bool
+
+- name: Ensure Docker service is running
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Ensure FRR is running (required for BGP IP portability)
+  ansible.builtin.systemd:
+    name: frr
+    state: started
+    enabled: true
+
+- name: Create cnf system user (owns config + state dirs on the host)
   ansible.builtin.user:
     name: cnf
     system: true
-    shell: /bin/bash
+    shell: /usr/sbin/nologin
     home: /var/lib/cnf
     create_home: true
 
-- name: Create CNF directories
+- name: Create CNF host directories
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -35,24 +53,6 @@
     - /etc/cnf/tls
     - /var/log/cnf
     - /var/lib/cnf
-
-- name: Install openstack-cnf package
-  ansible.builtin.pip:
-    name: openstack-cnf
-    version: "{{ cnf_version | default('0.1.0') }}"
-    executable: pip3
-    extra_args: "--index-url {{ cnf_pip_index | default('https://pypi.org/simple') }}"
-
-- name: Compile protobuf stubs
-  ansible.builtin.command:
-    cmd: >
-      python3 -m grpc_tools.protoc
-      -I /usr/local/lib/python3.11/dist-packages/cnf/../../../proto
-      --python_out=/usr/local/lib/python3.11/dist-packages/cnf/grpc
-      --grpc_python_out=/usr/local/lib/python3.11/dist-packages/cnf/grpc
-      proto/cnf.proto
-  changed_when: false
-  ignore_errors: true
 
 - name: Deploy CNF configuration
   ansible.builtin.template:
@@ -77,14 +77,54 @@
   no_log: true
   notify: Restart CNF agent
 
-- name: Deploy systemd service unit
-  ansible.builtin.template:
-    src: cnf-agent.service.j2
-    dest: /etc/systemd/system/cnf-agent.service
-    mode: "0644"
-  notify:
-    - Reload systemd
-    - Restart CNF agent
+- name: Log in to container registry
+  community.docker.docker_login:
+    registry_url: "{{ cnf_image_registry }}"
+    username: "{{ cnf_image_registry_user }}"
+    password: "{{ cnf_image_registry_password }}"
+  when:
+    - cnf_image_registry is defined
+    - cnf_image_registry_user is defined
+  no_log: true
+
+- name: Pull CNF container image
+  community.docker.docker_image:
+    name: "{{ cnf_image }}:{{ cnf_image_tag | default(cnf_version | default('0.1.0')) }}"
+    source: pull
+    force_source: "{{ cnf_image_force_pull | default(false) | bool }}"
+
+- name: Run CNF agent container
+  community.docker.docker_container:
+    name: "{{ cnf_container_name | default('cnf-agent') }}"
+    image: "{{ cnf_image }}:{{ cnf_image_tag | default(cnf_version | default('0.1.0')) }}"
+    state: started
+    restart_policy: unless-stopped
+    # Host networking: required for BGP via host's FRR, libvirt live-migration
+    # tunnels, and to expose REST :8080, gRPC :50051, metrics :9090 on the
+    # controller's real IP without port-mapping gymnastics.
+    network_mode: host
+    pid_mode: host
+    capabilities:
+      - NET_ADMIN
+      - SYS_PTRACE
+    volumes:
+      - /etc/cnf:/etc/cnf:ro
+      - /etc/ceph:/etc/ceph:ro
+      - /var/log/cnf:/var/log/cnf:rw
+      - /var/lib/cnf:/var/lib/cnf:rw
+      - /var/run/libvirt:/var/run/libvirt:rw
+      - /var/run/frr:/var/run/frr:rw
+    env:
+      CNF_CONFIG: /etc/cnf/cnf.yaml
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    labels:
+      app: cnf-agent
+      cluster: "{{ cnf_cluster_name }}"
 
 - name: Register CNF as OpenStack service
   openstack.cloud.catalog:
@@ -105,13 +145,6 @@
   loop: [public, internal, admin]
   delegate_to: "{{ groups['controllers'][0] }}"
   run_once: true
-
-- name: Enable and start CNF agent
-  ansible.builtin.systemd:
-    name: cnf-agent
-    state: started
-    enabled: true
-    daemon_reload: true
 
 - name: Wait for CNF API to become healthy
   ansible.builtin.uri:

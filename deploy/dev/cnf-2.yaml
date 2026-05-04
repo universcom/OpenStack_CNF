@@ -1,0 +1,18 @@
+# Local-dev config for cnf-agent-2 (cluster openstack-2).
+# Most settings come from env vars set in docker-compose.yml — this file
+# only carries values that are awkward to express as env vars.
+
+peer_clusters:
+  - "cnf-agent-1:50051"
+
+ceph:
+  pool: "vms"
+  mirror_mode: "image"
+
+bgp:
+  enabled: false
+  as_number: 65002
+
+raft:
+  etcd_prefix: "/cnf/raft"
+  lease_ttl_seconds: 10
