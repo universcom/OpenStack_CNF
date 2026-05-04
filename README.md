@@ -8,19 +8,44 @@
 
 CNF runs **directly on each OpenStack controller node** — no external control plane needed. One node wins master election via Raft (etcd), and all nodes expose the full CLI and REST API. Commands sent to any worker are transparently proxied to the current master.
 
-```
-openstack-1 (controller)          openstack-2 (controller)          openstack-3 (controller)
-┌─────────────────────────┐       ┌─────────────────────────┐       ┌─────────────────────────┐
-│  Nova / Neutron / KS    │       │  Nova / Neutron / KS    │       │  Nova / Neutron / KS    │
-│  CNF MASTER  ◄──gRPC───►│       │  CNF WORKER  ◄──gRPC───►│       │  CNF WORKER             │
-│  CLI / REST :8080        │       │  CLI / REST :8080        │       │  CLI / REST :8080        │
-│  BGP Speaker (FRR)      │       │  BGP Speaker (FRR)       │       │  BGP Speaker (FRR)      │
-│  Ceph OSD + rbd-mirror  │       │  Ceph OSD + rbd-mirror  │       │  Ceph OSD + rbd-mirror  │
-└─────────────────────────┘       └─────────────────────────┘       └─────────────────────────┘
-          │                                    │                                    │
-          └────────────────────────────────────┼────────────────────────────────────┘
-                              Cross-cluster Ceph RBD pool (shared)
-                              BGP Route Reflector (VM IP portability)
+```mermaid
+flowchart TB
+    subgraph os1["openstack-1 (controller)"]
+        direction TB
+        N1["Nova / Neutron / Keystone"]
+        M1["CNF MASTER<br/>CLI / REST :8080"]
+        B1["BGP Speaker (FRR)"]
+        C1["Ceph OSD + rbd-mirror"]
+    end
+    subgraph os2["openstack-2 (controller)"]
+        direction TB
+        N2["Nova / Neutron / Keystone"]
+        M2["CNF WORKER<br/>CLI / REST :8080"]
+        B2["BGP Speaker (FRR)"]
+        C2["Ceph OSD + rbd-mirror"]
+    end
+    subgraph os3["openstack-3 (controller)"]
+        direction TB
+        N3["Nova / Neutron / Keystone"]
+        M3["CNF WORKER<br/>CLI / REST :8080"]
+        B3["BGP Speaker (FRR)"]
+        C3["Ceph OSD + rbd-mirror"]
+    end
+
+    M1 <-->|mTLS gRPC| M2
+    M2 <-->|mTLS gRPC| M3
+    M1 <-->|mTLS gRPC| M3
+
+    CEPH[("Cross-cluster Ceph RBD pool<br/>(shared, rbd-mirror)")]
+    RR{{"BGP Route Reflector<br/>VM IP portability"}}
+
+    C1 --- CEPH
+    C2 --- CEPH
+    C3 --- CEPH
+
+    B1 --- RR
+    B2 --- RR
+    B3 --- RR
 ```
 
 ### Key design decisions
@@ -160,23 +185,27 @@ curl http://localhost:8080/v1/migrations/<migration-id>
 
 ### Live migration (Ceph + BGP)
 
-```
-1. PREFLIGHT   — verify VM is ACTIVE, RBD mirror lag within threshold
-2. DISK        — check Ceph sync; VM still running and writing
-3. MEMORY      — open QEMU tunnel; pre-copy memory pages to destination
-4. CUTOVER     — flush last RBD dirty blocks; demote source; promote dest
-5. BGP         — destination announces VM IP; source withdraws it
-6. CLEANUP     — remove source VM record from Nova
+```mermaid
+flowchart LR
+    P["1. PREFLIGHT<br/>verify ACTIVE<br/>RBD lag check"]
+    D["2. DISK<br/>Ceph sync<br/>VM still running"]
+    M["3. MEMORY<br/>QEMU tunnel<br/>pre-copy pages"]
+    C["4. CUTOVER<br/>flush dirty blocks<br/>demote / promote"]
+    B["5. BGP<br/>dest announces IP<br/>source withdraws"]
+    X["6. CLEANUP<br/>remove source<br/>Nova record"]
+    P --> D --> M --> C --> B --> X
 ```
 
 ### Cold migration
 
-```
-1. PREFLIGHT   — verify VM is ACTIVE or SHUTOFF, RBD lag check
-2. DISK        — stop VM; wait for final RBD sync; demote/promote
-3. CUTOVER     — register volume in destination Cinder
-4. BGP         — IP handoff via BGP
-5. CLEANUP     — delete source VM
+```mermaid
+flowchart LR
+    P["1. PREFLIGHT<br/>ACTIVE / SHUTOFF<br/>RBD lag check"]
+    D["2. DISK<br/>stop VM<br/>final sync<br/>demote / promote"]
+    C["3. CUTOVER<br/>register volume<br/>in dest Cinder"]
+    B["4. BGP<br/>IP handoff"]
+    X["5. CLEANUP<br/>delete source VM"]
+    P --> D --> C --> B --> X
 ```
 
 ---
