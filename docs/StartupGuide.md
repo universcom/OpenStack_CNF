@@ -1,7 +1,6 @@
 # CNF — Startup Guide
 
 **Project**: CNF v0.1.0
-**Date**: 2026-04-27
 
 > Step-by-step startup guide for all CNF containers/services on controller nodes, in the correct order.
 

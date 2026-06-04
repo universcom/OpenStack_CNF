@@ -1,7 +1,6 @@
 # CNF — UML Diagrams
 
 **Project**: CNF v0.1.0
-**Date**: 2026-04-27
 
 > All diagrams use [Mermaid](https://mermaid.js.org/) and render natively in GitHub, GitLab, VS Code (Mermaid extension), and Obsidian.
 

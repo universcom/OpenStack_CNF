@@ -1,7 +1,6 @@
 # CNF — High Level Design (HLD)
 
 **Project**: CNF v0.1.0
-**Date**: 2026-04-27
 
 ---
 
