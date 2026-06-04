@@ -1,0 +1,20 @@
+# /etc/ceph/ceph.client.cnf.keyring — example placeholder.
+#
+# Generate the real keyring on a Ceph mon host:
+#
+#   ceph auth get-or-create client.cnf \
+#     mon  'profile rbd'                                          \
+#     osd  'profile rbd pool=vms'                                 \
+#     mgr  'profile rbd pool=vms'                                 \
+#     -o /etc/ceph/ceph.client.cnf.keyring
+#
+# Then copy the resulting file to each CNF agent host with mode 0600 and
+# owner cnf:cnf. The path here must match `ceph.keyring_path` in cnf.yaml.
+#
+# Real keyrings contain a base64 secret — DO NOT commit them.
+
+[client.cnf]
+    key = REPLACE_WITH_BASE64_SECRET_FROM_CEPH_AUTH_GET_OR_CREATE
+    caps mon = "profile rbd"
+    caps osd = "profile rbd pool=vms"
+    caps mgr = "profile rbd pool=vms"

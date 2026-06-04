@@ -1,0 +1,129 @@
+# ─────────────────────────────────────────────────────────────────────────
+# CNF Agent — main configuration file
+#
+# Loaded from $CNF_CONFIG (default /etc/cnf/cnf.yaml). Schema is defined in
+# cnf/config.py (Settings + sub-models). Any field below may also be
+# overridden by an environment variable using the prefixes shown in the
+# section comments.
+#
+# Env-var overlay rule: env vars take precedence over YAML.
+# ─────────────────────────────────────────────────────────────────────────
+
+# ── Cluster identity ─────────────────────────────────────────────────────
+# CNF_CLUSTER_ID, CNF_CLUSTER_NAME, CNF_CLUSTER_GRPC_ADDR, CNF_PEER_CLUSTERS
+cluster_id:        "00000000-0000-0000-0000-000000000000"   # UUIDv4 — auto-generated if blank
+cluster_name:      "openstack-1"
+cluster_grpc_addr: "cnf-agent-1.example.com:50051"
+
+# Peer cluster gRPC endpoints — host:port of every other CNF agent in the federation.
+peer_clusters:
+  - "cnf-agent-2.example.com:50051"
+
+# ── Operational ──────────────────────────────────────────────────────────
+log_level:  "INFO"      # CNF_LOG_LEVEL  — DEBUG | INFO | WARN | ERROR
+log_format: "json"      # CNF_LOG_FORMAT — "json" | "console"
+
+migration_max_lag_bytes:     52428800   # CNF_MIGRATION_MAX_LAG_BYTES (50 MiB)
+migration_memory_chunk_size: 65536      # CNF_MIGRATION_MEMORY_CHUNK_SIZE (64 KiB)
+
+# ── REST API (FastAPI) ───────────────────────────────────────────────────
+# Env prefix: CNF_API_
+api:
+  host:               "0.0.0.0"
+  port:               8080
+  workers:            4
+  reload:             false
+  cors_origins:       ["*"]
+  jwt_secret:         ""              # MUST be set in production (use env var or secret)
+  jwt_algorithm:      "HS256"
+  jwt_expire_minutes: 60
+
+# ── gRPC inter-cluster control plane ─────────────────────────────────────
+# Env prefix: CNF_GRPC_
+grpc:
+  port:                50051
+  max_workers:         20
+  keepalive_time_ms:    10000
+  keepalive_timeout_ms:  5000
+  max_message_length:  67108864   # 64 MiB
+  tls_enabled:         true
+  tls_cert:            "/etc/cnf/tls/server.crt"
+  tls_key:             "/etc/cnf/tls/server.key"
+  tls_ca:              "/etc/cnf/tls/ca.crt"
+
+# ── Raft / leader election (etcd-backed) ─────────────────────────────────
+# Env prefix: CNF_RAFT_
+raft:
+  etcd_endpoints:        ["localhost:2379"]
+  etcd_prefix:           "/cnf/raft"
+  etcd_tls_cert:         ""
+  etcd_tls_key:          ""
+  etcd_tls_ca:           ""
+  election_timeout_ms:   1500
+  heartbeat_interval_ms:  500
+  lease_ttl_seconds:       10
+
+# ── Ceph / RBD storage layer ─────────────────────────────────────────────
+# Env prefix: CNF_CEPH_
+# Note: the agent shells out to the `rbd` CLI from ceph-common; these paths
+# point to standard Ceph client config files that the CLI expects.
+ceph:
+  conf_path:                    "/etc/ceph/ceph.conf"
+  keyring_path:                 "/etc/ceph/ceph.client.cnf.keyring"
+  client_name:                  "client.cnf"
+  pool:                         "vms"
+  mirror_mode:                  "image"     # "image" | "pool"
+  mirror_lag_threshold_bytes:   52428800    # 50 MiB — cutover when delta < this
+  mirror_lag_threshold_seconds: 30
+
+# ── BGP / FRR for VM IP portability ──────────────────────────────────────
+# Env prefix: CNF_BGP_
+bgp:
+  enabled:                  true
+  frr_socket:               "/var/run/frr/vtysh.sock"
+  as_number:                65001
+  route_reflector_addr:     ""              # optional iBGP RR for multi-cluster mesh
+  bfd_enabled:              true
+  hold_time:                9
+  keepalive:                3
+  convergence_wait_seconds: 5
+
+# ── OpenStack / Keystone ─────────────────────────────────────────────────
+# Env prefix: OS_  (matches the standard OpenStack RC file convention)
+openstack:
+  auth_url:             "http://keystone.example.com:5000/v3"
+  username:             "cnf"
+  password:             ""               # MUST be set via env var in production
+  project_name:         "admin"
+  project_domain_name:  "Default"
+  user_domain_name:     "Default"
+  region_name:          "RegionOne"
+  interface:            "internal"
+  identity_api_version: "3"
+
+# ── Database (PostgreSQL via SQLAlchemy + asyncpg) ───────────────────────
+# Env prefix: CNF_DB_
+database:
+  url:           "postgresql+asyncpg://cnf:cnf@postgres:5432/cnf"
+  pool_size:     10
+  max_overflow:  20
+  pool_timeout:  30
+  echo:          false
+
+# ── Celery (migration task executor + scheduler) ─────────────────────────
+# Env prefix: CNF_CELERY_
+celery:
+  broker_url:                 "redis://redis:6379/0"
+  result_backend:             "redis://redis:6379/1"
+  task_serializer:            "json"
+  result_serializer:          "json"
+  task_soft_time_limit:       3600
+  task_time_limit:            7200
+  worker_prefetch_multiplier: 1
+
+# ── Metrics (Prometheus exporter) ────────────────────────────────────────
+# Env prefix: CNF_METRICS_
+metrics:
+  enabled:                     true
+  port:                        9090
+  collection_interval_seconds: 30

@@ -1,0 +1,39 @@
+# /etc/ceph/ceph.conf — connection settings for the Ceph cluster that hosts
+# the `vms` RBD pool used as the live-migration backing store.
+#
+# Copy to /etc/ceph/ceph.conf on each CNF agent host and adjust the values
+# for your cluster. The agent shells out to the `rbd` CLI (from ceph-common),
+# which reads this file plus the keyring referenced in cnf.yaml.
+
+[global]
+    # Cluster identity — must match `ceph fsid` on the mon hosts
+    fsid                          = 00000000-0000-0000-0000-000000000000
+    mon_initial_members           = mon1,mon2,mon3
+    mon_host                      = 10.0.0.10,10.0.0.11,10.0.0.12
+
+    # Networks
+    public_network                = 10.0.0.0/24
+    cluster_network               = 10.0.1.0/24
+
+    # Authentication
+    auth_cluster_required         = cephx
+    auth_service_required         = cephx
+    auth_client_required          = cephx
+
+    # Default replication / pool settings
+    osd_pool_default_size         = 3
+    osd_pool_default_min_size     = 2
+    osd_pool_default_pg_num       = 128
+    osd_pool_default_pgp_num      = 128
+
+    # Sensible RBD defaults for live migration
+    rbd_default_features          = layering,exclusive-lock,object-map,fast-diff,deep-flatten
+    rbd_default_format            = 2
+
+[client.cnf]
+    # Per-client overrides for the cnf agent.
+    # Keyring path matches `ceph.keyring_path` in cnf.yaml.
+    keyring                       = /etc/ceph/ceph.client.cnf.keyring
+
+    # Cap the in-flight bytes for export-diff streams during memory transfer.
+    rbd_concurrent_management_ops = 10

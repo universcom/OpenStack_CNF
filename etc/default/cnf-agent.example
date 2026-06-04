@@ -1,0 +1,23 @@
+# /etc/default/cnf-agent — environment overlay for the systemd unit.
+#
+# Copy to /etc/default/cnf-agent (mode 0640, owner root:cnf). Values here
+# override anything in /etc/cnf/cnf.yaml. Use this file for secrets that
+# you don't want sitting in YAML on disk.
+
+# ── Identity ─────────────────────────────────────────────────────────────
+# CNF_CLUSTER_ID=11111111-1111-1111-1111-000000000001
+# CNF_CLUSTER_NAME=openstack-1
+# CNF_CLUSTER_GRPC_ADDR=cnf-agent-1.example.com:50051
+
+# ── Secrets ──────────────────────────────────────────────────────────────
+# CNF_API_JWT_SECRET=replace-with-a-long-random-string
+# OS_PASSWORD=replace-with-keystone-password
+
+# ── Database / Redis (typically host-specific) ───────────────────────────
+# CNF_DB_URL=postgresql+asyncpg://cnf:cnf@db.example.com:5432/cnf
+# CNF_CELERY_BROKER_URL=redis://redis.example.com:6379/0
+# CNF_CELERY_RESULT_BACKEND=redis://redis.example.com:6379/1
+
+# ── Observability ────────────────────────────────────────────────────────
+# CNF_LOG_LEVEL=INFO
+# CNF_LOG_FORMAT=json

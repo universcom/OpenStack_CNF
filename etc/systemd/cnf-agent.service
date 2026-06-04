@@ -1,0 +1,57 @@
+# /etc/systemd/system/cnf-agent.service
+#
+# systemd unit for bare-metal / VM installs of the CNF agent. For container
+# deployments use the Helm chart (deploy/helm/cnf) or docker-compose.yml.
+#
+# Install:
+#   sudo install -m 0644 etc/systemd/cnf-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cnf-agent
+
+[Unit]
+Description=CNF — Cluster Nova Federation agent
+Documentation=https://github.com/anthropics/openstack-cnf
+After=network-online.target postgresql.service redis.service etcd.service frr.service
+Wants=network-online.target
+Requires=frr.service
+
+[Service]
+Type=simple
+User=cnf
+Group=cnf
+EnvironmentFile=-/etc/default/cnf-agent
+Environment=CNF_CONFIG=/etc/cnf/cnf.yaml
+Environment=PYTHONUNBUFFERED=1
+Environment=PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+
+# Adjust this path to where the cnf-agent entry-point was installed
+# (pip install . -> /usr/local/bin/cnf-agent; venv -> /opt/cnf/bin/cnf-agent).
+ExecStart=/usr/local/bin/cnf-agent
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillMode=mixed
+
+# Resource limits — VM live migrations stream multi-GB images through this
+# process, so generous file-descriptor and memory limits are necessary.
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/cnf /var/lib/cnf /var/run/frr
+StateDirectory=cnf
+LogsDirectory=cnf
+
+# Capabilities needed for kernel route manipulation (see cnf.network.bgp).
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target

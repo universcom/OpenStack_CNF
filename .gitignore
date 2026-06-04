@@ -190,3 +190,11 @@ docker-compose.override.yml
 *.local.yaml
 .claude
 .claude/*
+
+# Local runtime config / generated files (cnf/)
+cnf/etc/
+cnf/generate_configs/
+cnf/generated_configs/
+cnf/**/*.generated.yml
+cnf/**/*.generated.yaml
+cnf/**/*.generated.json

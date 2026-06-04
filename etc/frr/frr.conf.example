@@ -1,0 +1,53 @@
+! /etc/frr/frr.conf — FRR running config for a CNF agent host.
+!
+! Notes:
+!   * The CNF agent injects/withdraws `network` statements via vtysh at
+!     migration cutover (see cnf/network/bgp.py). Static base config below
+!     covers peering only — no per-VM prefixes are committed here.
+!   * `as_number`, `bfd_enabled`, hold/keepalive timers MUST match the
+!     `bgp:` block in /etc/cnf/cnf.yaml.
+!   * Replace AS / IP / interface placeholders before deploying.
+
+frr version 8.4
+frr defaults traditional
+hostname cnf-agent-1
+log syslog informational
+service integrated-vtysh-config
+!
+! ── BFD: sub-second peer-down detection (matches bgp.bfd_enabled=true) ──
+bfd
+ profile cnf-fast
+  detect-multiplier 3
+  receive-interval 300
+  transmit-interval 300
+ exit
+exit
+!
+! ── BGP speaker ────────────────────────────────────────────────────────
+router bgp 65001
+ bgp router-id 10.0.0.1
+ no bgp default ipv4-unicast
+ timers bgp 3 9                              ! keepalive 3s, hold 9s
+ !
+ ! Top-of-rack / route-reflector neighbour. Use the address from
+ ! bgp.route_reflector_addr in cnf.yaml when set.
+ neighbor TOR peer-group
+ neighbor TOR remote-as 65000
+ neighbor TOR bfd profile cnf-fast
+ neighbor 10.0.0.254 peer-group TOR
+ !
+ address-family ipv4 unicast
+  neighbor TOR activate
+  neighbor TOR soft-reconfiguration inbound
+  ! VM /32 prefixes are added/removed dynamically by cnf.network.bgp;
+  ! no static `network` statements here.
+ exit-address-family
+exit
+!
+! ── Kernel routing ────────────────────────────────────────────────────
+ip forwarding
+ipv6 forwarding
+!
+line vty
+!
+end

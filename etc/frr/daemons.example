@@ -1,0 +1,33 @@
+# /etc/frr/daemons — which FRR daemons to start.
+#
+# The CNF agent only drives BGP (via vtysh), but bgpd needs zebra to push
+# learned/announced routes into the kernel FIB. bfdd is recommended for
+# sub-second peer failure detection (cnf.network.bgp.bfd_enabled).
+
+zebra=yes
+bgpd=yes
+bfdd=yes
+ospfd=no
+ospf6d=no
+ripd=no
+ripngd=no
+isisd=no
+pimd=no
+ldpd=no
+nhrpd=no
+eigrpd=no
+babeld=no
+sharpd=no
+pbrd=no
+staticd=yes
+fabricd=no
+vrrpd=no
+
+# Per-daemon options (see /etc/frr/daemons in the FRR distribution for the
+# full set of knobs). Default values are fine for CNF.
+zebra_options="  -A 127.0.0.1 -s 90000000"
+bgpd_options="   -A 127.0.0.1"
+bfdd_options="   -A 127.0.0.1"
+staticd_options="-A 127.0.0.1"
+
+vtysh_enable=yes

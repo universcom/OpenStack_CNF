@@ -1,0 +1,22 @@
+# /etc/logrotate.d/cnf-agent
+#
+# The CNF agent logs in structured-JSON format (log_format: "json") to
+# stdout/stderr by default; systemd captures it via journald. When the
+# operator redirects logs to /var/log/cnf/agent.log this policy keeps the
+# disk footprint bounded.
+
+/var/log/cnf/*.log {
+    daily
+    rotate 14
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0640 cnf cnf
+    sharedscripts
+    postrotate
+        # Agent re-opens log files on SIGHUP.
+        systemctl reload cnf-agent.service > /dev/null 2>&1 || true
+    endscript
+}
